@@ -2,31 +2,40 @@ import whisper
 from pydub import AudioSegment
 import nltk
 import os
+import torch
+import asyncio
+import re
 
 # Download the Punkt tokenizer for sentence splitting (if you haven't already)
 nltk.download('punkt')
-nltk.download('punkt_tab')
 
-# Load Whisper model
-model = whisper.load_model("base")
+# Load Whisper model with GPU support if available
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = whisper.load_model("base", device=device)
+print(f"Running on: {device}")
 
 # Transcribe the audio file with word-level timestamps
-result = model.transcribe("SplitBySentence/Unit_1.mp3", word_timestamps=True)
-
+result = model.transcribe("Unit_1.mp3", word_timestamps=True)
 
 # Create an output directory for sentence audio files
 output_dir = "output_sentences"
 os.makedirs(output_dir, exist_ok=True)
 
 # Load the original audio file
-audio = AudioSegment.from_mp3("SplitBySentence/Unit_1.mp3")
+audio = AudioSegment.from_mp3("Unit_1.mp3")
 
 # Function to split audio based on start and end times
-def split_audio(audio, start_time, end_time, output_filename):
-    start_ms = float(start_time) * 1000  # Convert to milliseconds and ensure proper float type
+async def async_split_audio(audio, start_time, end_time, output_filename):
+    start_ms = float(start_time) * 1000  # Convert to milliseconds
     end_ms = float(end_time) * 1000
     segment = audio[start_ms:end_ms]
     segment.export(output_filename, format="wav")
+    print(f"Saved: {output_filename}")
+
+# Function to clean filenames by removing special characters
+def clean_filename(text):
+    # Replace special characters with underscores
+    return re.sub(r'[\\/*?:"<>|]', "_", text)
 
 # Use NLTK to split the full transcription into sentences
 sentences = nltk.sent_tokenize(result["text"])
@@ -72,9 +81,13 @@ for segment in result['segments']:
                 break
             sentence = sentences[sentence_index].strip()
 
+# Asynchronous function to split the audio in reverse order
+async def process_audio():
+    for idx, sentence in enumerate(reversed(sentence_segments)):
+        filename_safe_text = clean_filename(sentence['text'])  # Clean filename
+        output_filename = os.path.join(output_dir, f"{100 - idx}-{filename_safe_text}wav")
+        await async_split_audio(audio, sentence['start'], sentence['end'], output_filename)
 
-# Split the audio based on the sentence segments
-for idx, sentence in enumerate(sentence_segments):
-    output_filename = os.path.join(output_dir, f"{idx}-{sentence['text']}wav")
-    split_audio(audio, sentence['start'], sentence['end'], output_filename)
-    print(f"Saved: {output_filename} | Text: {sentence['text']}")
+# Run the asynchronous processing
+if __name__ == "__main__":
+    asyncio.run(process_audio())
