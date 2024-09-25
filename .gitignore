@@ -1,5 +1,5 @@
 output_sentences
-EffortlessTrainApp/.venv
+.venv
 *.pyc
 __pycache__/
 
